@@ -475,7 +475,7 @@ namespace CleanupSnatcher.Patches
             {
                 "DrifterGrenade" => "RoR2/Base/StickyBomb/texStickyBombIcon.png",
                 "DrifterJunkBall" => "RoR2/DLC3/Items/texJunkIcon.png",
-                "DrifterToolbotCrate" => "RoR2/DLC3/PowerOrbPedestal/texPowerCubeIcon.png ",
+                "DrifterToolbotCrate" => "RoR2/DLC3/Items/PowerCube/texPowerCubeIcon.png",
                 "DrifterHotSauce" => "RoR2/DLC1/Molotov/texMolotovIcon.png",
                 "DrifterKnife" => "RoR2/Base/Dagger/texDaggerIcon.png",
                 "DrifterBubbleShield" => "RoR2/Junk/Engi/texEngiShieldSpriteCrosshair.png",
@@ -484,7 +484,7 @@ namespace CleanupSnatcher.Patches
                 "DrifterBrokenDrone" => "RoR2/Base/Drones/texDrone2Icon.png",
                 "DrifterBrokenHAND" => "RoR2/Base/Toolbot/texToolbotIcon.png",
                 "DrifterEvilSkull" => "RoR2/Base/AltarSkeleton/texAltarSkeletonBody.png",
-                _ => null
+                _ => "RoR2/Base/Common/MiscIcons/texMysteryIcon.png"
             };
 
             if (!string.IsNullOrEmpty(addressableKey))
@@ -694,7 +694,8 @@ namespace CleanupSnatcher.Patches
                 // Skip core components that should remain active
                 var componentType = behaviour.GetType();
                 if (componentType == typeof(NetworkIdentity) ||
-                    componentType == typeof(SpecialObjectAttributes))
+                    componentType == typeof(SpecialObjectAttributes) ||
+                    componentType == typeof(CharacterBody)) // Don't disable CharacterBody
                 {
                     continue;
                 }
@@ -704,6 +705,27 @@ namespace CleanupSnatcher.Patches
                 if (PluginConfig.EnableDebugLogs.Value)
                 {
                     Log.Info($"{Constants.LogPrefix} Disabled behavior: {componentType.Name} on {objName}");
+                }
+            }
+
+            // Set ungrabbable = false on CharacterBody to allow grabbing
+            var characterBody = obj.GetComponent<CharacterBody>();
+            if (characterBody != null)
+            {
+                try
+                {
+                    Traverse.Create(characterBody).Property("ungrabbable").SetValue(false);
+                    if (PluginConfig.EnableDebugLogs.Value)
+                    {
+                        Log.Info($"{Constants.LogPrefix} Set ungrabbable=false on CharacterBody for projectile {objName}");
+                    }
+                }
+                catch (System.Exception ex)
+                {
+                    if (PluginConfig.EnableDebugLogs.Value)
+                    {
+                        Log.Info($"{Constants.LogPrefix} Failed to set ungrabbable on CharacterBody for projectile {objName}: {ex.Message}");
+                    }
                 }
             }
         }
