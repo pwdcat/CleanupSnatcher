@@ -73,87 +73,6 @@ namespace CleanupSnatcher.Patches
             }
         }
 
-        // Patch ThrownObjectProjectileController
-        // This fixes the NullReferenceException that occurs when grabbed projectiles are thrown
-        [HarmonyPatch(typeof(RoR2.Projectile.ThrownObjectProjectileController), "CalculatePassengerFinalPosition")]
-        public class ThrownObjectProjectileController_CalculatePassengerFinalPosition_Patch
-        {
-            [HarmonyPrefix]
-            public static bool Prefix(RoR2.Projectile.ThrownObjectProjectileController __instance, ref Vector3 position, ref Quaternion rotation)
-            {
-                if (PluginConfig.EnableDebugLogs.Value && __instance != null && __instance.gameObject != null)
-                {
-                    Log.Info($"{Constants.LogPrefix} CalculatePassengerFinalPosition called on {__instance.gameObject.name}");
-                }
-
-                // Check if the passenger (the thrown object) was made grabbable
-                // The SpecialObjectAttributes is on the passenger, not the controller
-                GameObject passenger = null;
-                try
-                {
-                    passenger = Traverse.Create(__instance).Field("passenger").GetValue<GameObject>();
-                }
-                catch (Exception ex)
-                {
-                    if (PluginConfig.EnableDebugLogs.Value)
-                    {
-                        Log.Info($"{Constants.LogPrefix} Failed to get passenger: {ex.Message}");
-                    }
-                }
-
-                if (PluginConfig.EnableDebugLogs.Value)
-                {
-                    Log.Info($"{Constants.LogPrefix} Passenger: {(passenger != null && passenger.gameObject != null ? passenger.name : "null")}");
-                }
-
-                if (passenger != null && passenger.gameObject != null)
-                {
-                    var soa = passenger.GetComponent<SpecialObjectAttributes>();
-                    if (PluginConfig.EnableDebugLogs.Value)
-                    {
-                        Log.Info($"{Constants.LogPrefix} SOA: {soa != null}, grabbable: {soa?.grabbable ?? false}");
-                    }
-
-                    if (soa != null && soa.grabbable)
-                    {
-                        // This passenger was a projectile that was made grabbable - it may not have proper passenger setup
-                        // Provide fallback position/rotation
-                        position = passenger.transform.position;
-                        rotation = passenger.transform.rotation;
-
-                        if (PluginConfig.EnableDebugLogs.Value)
-                        {
-                            Log.Info($"{Constants.LogPrefix} Provided fallback position/rotation for grabbable projectile passenger {passenger.name}");
-                        }
-                        return false; // Skip the original method
-                    }
-                }
-                else
-                {
-                    // Passenger is null or destroyed
-                    if (__instance != null && __instance.transform != null)
-                    {
-                        position = __instance.transform.position;
-                        rotation = __instance.transform.rotation;
-                    }
-                    else
-                    {
-                        position = Vector3.zero;
-                        rotation = Quaternion.identity;
-                    }
-
-                    if (PluginConfig.EnableDebugLogs.Value)
-                    {
-                        Log.Info($"{Constants.LogPrefix} Passenger is null or destroyed, providing fallback position/rotation");
-                    }
-                    return false; // Skip the original method
-                }
-
-                // Let normal thrown objects work as usual
-                return true;
-            }
-        }
-
         // Patch NetworkServer.Spawn to add SpecialObjectAttributes to projectiles when the flag is set
         // This catches the actual instantiated projectile object
         [HarmonyPatch(typeof(NetworkServer), "Spawn", typeof(GameObject))]
@@ -708,23 +627,23 @@ namespace CleanupSnatcher.Patches
                 }
             }
 
-            // Set ungrabbable = false on CharacterBody to allow grabbing
+            // Clear Ungrabbable flag on CharacterBody to allow grabbing
             var characterBody = obj.GetComponent<CharacterBody>();
             if (characterBody != null)
             {
                 try
                 {
-                    Traverse.Create(characterBody).Property("ungrabbable").SetValue(false);
+                    characterBody.bodyFlags &= ~CharacterBody.BodyFlags.Ungrabbable;
                     if (PluginConfig.EnableDebugLogs.Value)
                     {
-                        Log.Info($"{Constants.LogPrefix} Set ungrabbable=false on CharacterBody for projectile {objName}");
+                        Log.Info($"{Constants.LogPrefix} Cleared Ungrabbable flag on CharacterBody for projectile {objName}");
                     }
                 }
                 catch (System.Exception ex)
                 {
                     if (PluginConfig.EnableDebugLogs.Value)
                     {
-                        Log.Info($"{Constants.LogPrefix} Failed to set ungrabbable on CharacterBody for projectile {objName}: {ex.Message}");
+                        Log.Info($"{Constants.LogPrefix} Failed to clear Ungrabbable flag on CharacterBody for projectile {objName}: {ex.Message}");
                     }
                 }
             }
