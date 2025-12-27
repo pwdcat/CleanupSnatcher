@@ -20,6 +20,9 @@ namespace CleanupSnatcher.Patches
         // Track when ToggleVisuals display is currently active
         private static bool _isToggleVisualsDisplayActive = false;
 
+        // Track the currently active projectile that should be the ONLY candidate for repossess
+        private static GameObject _activeProjectile = null;
+
         // Patch DrifterCleanupController.ToggleVisuals to track display state
         [HarmonyPatch(typeof(DrifterCleanupController), "ToggleVisuals")]
         public class DrifterCleanupController_ToggleVisuals_Patch
@@ -94,6 +97,14 @@ namespace CleanupSnatcher.Patches
 
                     // Add SpecialObjectAttributes to make the projectile grabbable
                     AddSpecialObjectAttributesToProjectile(obj);
+
+                    // Set this as the active projectile for exclusive repossess targeting
+                    _activeProjectile = obj;
+
+                    if (PluginConfig.EnableDebugLogs.Value)
+                    {
+                        Log.Info($"{Constants.LogPrefix} Set active projectile: {obj.name}");
+                    }
                 }
             }
         }
@@ -335,7 +346,7 @@ namespace CleanupSnatcher.Patches
                                             projectilePrefab = projectilePrefab,
                                             position = spawnPosition,
                                             rotation = Util.QuaternionSafeLookRotation(projectileDirection, Vector3.up),
-                                            speedOverride = 10f, // Counteract movement toward drifter to keep stationary
+                                            speedOverride = 0f, // Counteract movement toward drifter to keep stationary
                                             damage = damageCoefficient * damageStat,
                                             owner = gameObject,
                                             crit = false,
@@ -398,7 +409,7 @@ namespace CleanupSnatcher.Patches
                 "DrifterHotSauce" => "RoR2/DLC1/Molotov/texMolotovIcon.png",
                 "DrifterKnife" => "RoR2/Base/Dagger/texDaggerIcon.png",
                 "DrifterBubbleShield" => "RoR2/Junk/Engi/texEngiShieldSpriteCrosshair.png",
-                "DrifterGeode" => "RoR2/DLC2/Elites/EliteAurelionite/texAffixAurelioniteIcon.png",
+                "DrifterGeode" => "RoR2/DLC2/texAFUIChunkIcon.png",
                 "DrifterBarrel" => "RoR2/Base/Common/MiscIcons/texBarrelIcon.png",
                 "DrifterBrokenDrone" => "RoR2/Base/Drones/texDrone2Icon.png",
                 "DrifterBrokenHAND" => "RoR2/Base/Toolbot/texToolbotIcon.png",
@@ -719,6 +730,86 @@ namespace CleanupSnatcher.Patches
             totalSize = Mathf.Max(totalSize, 0.1f);
 
             return totalSize;
+        }
+
+        // Patch BaggedObject.OnEnter to clear active projectile when grabbed
+        [HarmonyPatch(typeof(EntityStates.Drifter.Bag.BaggedObject), "OnEnter")]
+        public class BaggedObject_OnEnter_Patch
+        {
+            [HarmonyPostfix]
+            public static void Postfix(EntityStates.Drifter.Bag.BaggedObject __instance)
+            {
+                if (_activeProjectile != null)
+                {
+                    // Check if the bagged object is the active projectile
+                    var traverse = Traverse.Create(__instance);
+                    var targetObject = traverse.Field("targetObject").GetValue<GameObject>();
+
+                    if (targetObject == _activeProjectile)
+                    {
+                        Log.Info($"{Constants.LogPrefix} Active projectile grabbed: {_activeProjectile.name}");
+                        _activeProjectile = null;
+                    }
+                }
+            }
+        }
+
+        // Patch ThrownObjectProjectileController.ImpactBehavior to clear active projectile on impact
+        [HarmonyPatch(typeof(ThrownObjectProjectileController), "ImpactBehavior")]
+        public class ThrownObjectProjectileController_ImpactBehavior_Patch
+        {
+            [HarmonyPostfix]
+            public static void Postfix(ThrownObjectProjectileController __instance)
+            {
+                if (_activeProjectile != null && __instance.gameObject == _activeProjectile)
+                {
+                    Log.Info($"{Constants.LogPrefix} Active projectile impacted: {_activeProjectile.name}");
+                    _activeProjectile = null;
+                }
+            }
+        }
+
+        // Patch Object.Destroy to clear active projectile when destroyed
+        [HarmonyPatch(typeof(UnityEngine.Object), "Destroy", typeof(UnityEngine.Object))]
+        public class Object_Destroy_Patch
+        {
+            [HarmonyPrefix]
+            public static void Prefix(UnityEngine.Object obj)
+            {
+                if (_activeProjectile != null && obj is GameObject go && go == _activeProjectile)
+                {
+                    Log.Info($"{Constants.LogPrefix} Active projectile destroyed: {_activeProjectile.name}");
+                    _activeProjectile = null;
+                }
+            }
+        }
+
+        // Patch RepossessBullseyeSearch.GetResults to always include active projectile first
+        [HarmonyPatch(typeof(RepossessBullseyeSearch), "GetResults")]
+        public class RepossessBullseyeSearch_GetResults_Patch
+        {
+            [HarmonyPostfix]
+            public static void Postfix(ref System.Collections.Generic.IEnumerable<GameObject> __result)
+            {
+                if (_activeProjectile != null)
+                {
+                    // Always include the active projectile first in results, regardless of any filters
+                    var resultList = new System.Collections.Generic.List<GameObject>(__result);
+                    if (!resultList.Contains(_activeProjectile))
+                    {
+                        resultList.Insert(0, _activeProjectile); // Add at the beginning for priority
+                        Log.Info($"{Constants.LogPrefix} Force-added active projectile to repossess results: {_activeProjectile.name}");
+                    }
+                    else
+                    {
+                        // Move it to the front if it's already there
+                        resultList.Remove(_activeProjectile);
+                        resultList.Insert(0, _activeProjectile);
+                        Log.Info($"{Constants.LogPrefix} Moved active projectile to front of repossess results: {_activeProjectile.name}");
+                    }
+                    __result = resultList;
+                }
+            }
         }
     }
 }
